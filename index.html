@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Math Trainer - True Diagnostics Edition</title>
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; background: #f0f4f8; display: flex; justify-content: center; padding: 20px; }
+        #app { background: white; padding: 30px; border-radius: 20px; box-shadow: 0 15px 35px rgba(0,0,0,0.15); width: 100%; max-width: 550px; text-align: center; border-top: 8px solid #3498db; position: relative; }
+        .grid-select { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 15px 0; text-align: left; background: #f9f9f9; padding: 15px; border-radius: 10px; border: 1px solid #ddd; }
+        .dot { display: inline-block; width: 12px; height: 12px; background: #3498db; border-radius: 50%; margin: 2px; }
+        .row-group { border: 1.5px solid #d1d8e0; margin: 6px; padding: 8px; display: inline-block; border-radius: 8px; background: #fff; }
+        .hidden { display: none; }
+        button { padding: 12px 24px; cursor: pointer; border-radius: 8px; border: none; background: #2ecc71; color: white; font-weight: bold; font-size: 1rem; margin: 5px; }
+        .reset-btn { background: #95a5a6; padding: 5px 10px; font-size: 0.8rem; position: absolute; top: 10px; right: 10px; }
+        .mode-btn { background: #3498db; width: 200px; }
+        input[type="text"], input[type="number"] { font-size: 1.5rem; padding: 10px; width: 80%; text-align: center; margin: 15px auto; border: 3px solid #ddd; border-radius: 10px; outline: none; display: block; }
+        input[type="number"] { font-size: 2.5rem; width: 150px; }
+        input.error { border-color: #e74c3c; background-color: #fdf2f2; }
+        #timer-container { width: 100%; height: 12px; background: #eee; border-radius: 6px; overflow: hidden; margin-bottom: 5px; }
+        #timer-bar { height: 100%; background: #e74c3c; width: 100%; }
+        #progress-text { font-size: 0.9rem; color: #7f8c8d; font-weight: bold; margin-bottom: 15px; }
+        #status-msg { font-weight: bold; min-height: 24px; margin-bottom: 10px; }
+        
+        .recovery-active { border-top: 8px solid #e67e22 !important; background-color: #fff9f2 !important; }
+        .recovery-banner { background: #e67e22; color: white; padding: 8px; border-radius: 5px; font-weight: bold; margin-bottom: 15px; }
+    </style>
+</head>
+<body>
+
+<div id="app">
+    <button id="mini-reset" class="reset-btn hidden" onclick="location.reload()">Reset</button>
+
+    <div id="setup-screen">
+        <h1>Math Trainer Dashboard</h1>
+        
+        <p><strong>Step 1: Enter Your Name</strong></p>
+        <input type="text" id="student-name" placeholder="First and Last Name" autocomplete="off">
+
+        <p><strong>Step 2: Select Timestables</strong></p>
+        <div class="grid-select" id="table-options"></div>
+        
+        <p><strong>Step 3: Time Limit</strong></p>
+        <select id="time-select" style="padding: 10px; width: 100%; border-radius: 5px;">
+            <option value="5">5 Seconds</option>
+            <option value="10" selected>10 Seconds</option>
+            <option value="15">15 Seconds</option>
+        </select>
+        <br><br>
+        <button class="mode-btn" onclick="start(true)">Multiplication (×)</button>
+        <button class="mode-btn" onclick="start(false)">Division (÷)</button>
+    </div>
+
+    <div id="quiz-screen" class="hidden">
+        <div id="recovery-notice" class="recovery-banner hidden">🧠 MATH RECOVERY: Use the dots below to solve it!</div>
+        <div id="progress-text">Question 1 of 20</div>
+        <div id="timer-container"><div id="timer-bar"></div></div>
+        <div id="status-msg"></div>
+        
+        <h2 id="question-display" style="font-size: 3.5rem; margin: 10px 0;"></h2>
+        
+        <input type="number" id="user-answer" placeholder="?" autocomplete="off">
+        <br>
+        <button id="action-btn" onclick="checkAnswer()">Submit</button>
+        
+        <div id="visual-clue" class="hidden" style="margin-top:20px;"></div>
+    </div>
+
+    <div id="result-screen" class="hidden">
+        <h2>Practice Complete!</h2>
+        <p id="final-score" style="font-size: 2rem; margin: 5px;"></p>
+        <p style="color: #2c3e50; font-weight: bold; font-size: 1.1rem;">Your clean tracking data is ready.</p>
+        <p style="color: #7f8c8d; max-width: 400px; margin: 0 auto 15px auto;">Click below to submit your scores. Your real first-attempt score and mistakes have been preserved.</p>
+        <br>
+        <button id="submit-form-btn" style="background: #2ecc71; font-size: 1.3rem; padding: 15px 30px;">👉 Hand In Score Sheet</button>
+    </div>
+</div>
+
+<script>
+    let isMultiplication = true, selectedTables = [], currentQ = {}, timerInterval, timeLeft, score = 0, count = 0, timerPaused = false, studentName = "";
+    let isRecoveryMode = false, hasLoggedCurrentMistake = false;
+    const totalQuestions = 20;
+    const pool = [2, 3, 4, 5, 6, 7, 8, 9, 11, 12];
+    let wrongAnswersLog = []; 
+    let questionDeck = [];
+
+    // Populate tables checkboxes on load
+    const container = document.getElementById('table-options');
+    pool.forEach(num => {
+        container.innerHTML += `<label style="padding:5px;"><input type="checkbox" class="tbl-check" value="${num}"> ${num}s</label>`;
+    });
+
+    document.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter' && !document.getElementById('quiz-screen').classList.contains('hidden')) checkAnswer();
+    });
+
+    function buildQuestionDeck() {
+        questionDeck = [];
+        selectedTables.forEach(n1 => {
+            pool.forEach(n2 => {
+                if (isMultiplication) {
+                    questionDeck.push({ a: n1, b: n2, ans: n1 * n2, text: `${n1} × ${n2}` });
+                } else {
+                    questionDeck.push({ a: n1 * n2, b: n1, ans: n2, text: `${n1 * n2} ÷ ${n1}` });
+                }
+            });
+        });
+
+        // Fisher-Yates shuffle
+        for (let i = questionDeck.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [questionDeck[i], questionDeck[j]] = [questionDeck[j], questionDeck[i]];
+        }
+    }
+
+    function start(mode) {
+        studentName = document.getElementById('student-name').value.trim();
+        if(!studentName) return alert("Please enter your name first!");
+
+        isMultiplication = mode;
+        const checks = document.querySelectorAll('.tbl-check:checked');
+        selectedTables = Array.from(checks).map(c => parseInt(c.value));
+        if(selectedTables.length === 0) return alert("Select at least one table!");
+
+        buildQuestionDeck();
+
+        document.getElementById('setup-screen').classList.add('hidden');
+        document.getElementById('quiz-screen').classList.remove('hidden');
+        document.getElementById('mini-reset').classList.remove('hidden');
+        generateQuestion();
+    }
+
+    function generateQuestion() {
+        isRecoveryMode = false;
+        hasLoggedCurrentMistake = false;
+        timerPaused = false;
+        
+        document.getElementById('app').classList.remove('recovery-active');
+        document.getElementById('recovery-notice').classList.add('hidden');
+        document.getElementById('timer-container').style.visibility = 'visible';
+        document.getElementById('action-btn').style.background = '#2ecc71';
+        document.getElementById('action-btn').innerText = 'Submit';
+
+        document.getElementById('progress-text').innerText = `Question ${count + 1} of ${totalQuestions}`;
+        document.getElementById('status-msg').innerHTML = "";
+        document.getElementById('user-answer').classList.remove('error');
+        document.getElementById('visual-clue').classList.add('hidden');
+        document.getElementById('visual-clue').innerHTML = '';
+        
+        // Refill deck if empty, avoiding repeating immediate last question
+        if (questionDeck.length === 0) {
+            const lastText = currentQ.text;
+            buildQuestionDeck();
+            if (questionDeck.length > 1 && questionDeck[questionDeck.length - 1].text === lastText) {
+                const popped = questionDeck.pop();
+                questionDeck.unshift(popped);
+            }
+        }
+
+        currentQ = questionDeck.pop();
+
+        document.getElementById('question-display').innerText = currentQ.text;
+        document.getElementById('user-answer').value = '';
+        document.getElementById('user-answer').focus();
+        resetTimer();
+    }
+
+    function switchToRecovery(reason) {
+        timerPaused = true;
+        clearInterval(timerInterval);
+        
+        if (!hasLoggedCurrentMistake) {
+            const userVal = document.getElementById('user-answer').value;
+            wrongAnswersLog.push(`${currentQ.text}=${userVal || reason}`);
+            hasLoggedCurrentMistake = true; 
+        }
+
+        isRecoveryMode = true;
+
+        document.getElementById('app').classList.add('recovery-active');
+        document.getElementById('recovery-notice').classList.remove('hidden');
+        document.getElementById('timer-container').style.visibility = 'hidden';
+        
+        document.getElementById('status-msg').innerHTML = reason === "Timeout" ? 
+            "<span style='color:#e67e22'>⏰ Out of time! Work it out below:</span>" : 
+            "<span style='color:#e67e22'>❌ Not quite. Count the dots to fix it:</span>";
+        
+        document.getElementById('action-btn').style.background = '#e67e22';
+        document.getElementById('action-btn').innerText = 'Verify Fixed Answer';
+        
+        const visual = document.getElementById('visual-clue');
+        visual.classList.remove('hidden');
+        visual.innerHTML = '';
+        let groups = isMultiplication ? currentQ.a : currentQ.b;
+        let perGroup = isMultiplication ? currentQ.b : currentQ.ans;
+
+        for(let i=0; i<groups; i++) {
+            let group = document.createElement('div');
+            group.className = 'row-group';
+            for(let j=0; j<perGroup; j++) group.innerHTML += '<div class="dot"></div>';
+            visual.appendChild(group);
+        }
+
+        document.getElementById('user-answer').value = '';
+        document.getElementById('user-answer').focus();
+    }
+
+    function resetTimer() {
+        clearInterval(timerInterval);
+        const maxTime = parseInt(document.getElementById('time-select').value);
+        timeLeft = maxTime;
+        const bar = document.getElementById('timer-bar');
+        timerInterval = setInterval(() => {
+            if(!timerPaused) {
+                timeLeft -= 0.1;
+                bar.style.width = (timeLeft / maxTime * 100) + "%";
+                if(timeLeft <= 0) {
+                    switchToRecovery("Timeout");
+                }
+            }
+        }, 100);
+    }
+
+    function checkAnswer() {
+        const userAns = parseInt(document.getElementById('user-answer').value);
+        
+        if (isRecoveryMode) {
+            if (userAns === currentQ.ans) {
+                count++;
+                if(count >= totalQuestions) endQuiz();
+                else generateQuestion();
+            } else {
+                document.getElementById('user-answer').classList.add('error');
+                document.getElementById('status-msg').innerHTML = "<span style='color:#e74c3c'>Still incorrect. Count the dots carefully!</span>";
+            }
+        } else {
+            if (userAns === currentQ.ans) {
+                score++;
+                count++;
+                if(count >= totalQuestions) endQuiz();
+                else generateQuestion();
+            } else {
+                switchToRecovery("Incorrect");
+            }
+        }
+    }
+
+    function endQuiz() {
+        clearInterval(timerInterval);
+        document.getElementById('quiz-screen').classList.add('hidden');
+        document.getElementById('mini-reset').classList.add('hidden');
+        document.getElementById('result-screen').classList.remove('hidden');
+        
+        document.getElementById('final-score').innerText = `Score: ${score} / ${totalQuestions}`;
+        
+        const modeText = isMultiplication ? "Multiplication" : "Division";
+        const cleanLog = wrongAnswersLog.length > 0 ? wrongAnswersLog.join(', ') : "None! Perfect Score";
+        
+        const encName = encodeURIComponent(studentName);
+        const encScore = encodeURIComponent(`${score}/${totalQuestions}`);
+        const encMode = encodeURIComponent(modeText);
+        const encLog = encodeURIComponent(cleanLog);
+
+        const targetURL = `https://docs.google.com/forms/d/e/1FAIpQLScMtRYPO2c57D_s_ZVC_P5RGWxm7Eqc0fGBwpOzYqSAalh1tw/viewform?usp=pp_url&entry.1585503977=${encName}&entry.1998209579=${encScore}&entry.1159079571=${encMode}&entry.1815172227=${encLog}`;
+        
+        document.getElementById('submit-form-btn').onclick = function() {
+            window.open(targetURL, '_blank');
+            location.reload();
+        };
+    }
+</script>
+</body>
+</html>
